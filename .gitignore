@@ -1,0 +1,9 @@
+# TfRecord Files
+*.tfrecord
+*.zip
+*.hdf5
+*.png
+*.bin
+
+# pycharm files
+.idea/
