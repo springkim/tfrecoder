@@ -5,6 +5,10 @@ import sys
 import cv2
 import numpy as np
 import tensorflow as tf
+import time
+import typing
+from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 HEIGHT = 96
 WIDTH = 96
@@ -37,9 +41,9 @@ def _bytes_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
-def to_tfrecord(img, label):
+def to_tfrecord(img, label, format: str = ".webp"):
     # buffer = img.tobytes()
-    buffer = cv2.imencode('.PNG', img)[1].tobytes()
+    buffer = cv2.imencode(format, img)[1].tobytes()
     feature_dict = {
         'height': tf.train.Feature(int64_list=tf.train.Int64List(value=[HEIGHT])),
         'width': tf.train.Feature(int64_list=tf.train.Int64List(value=[WIDTH])),
@@ -50,25 +54,20 @@ def to_tfrecord(img, label):
     return tf.train.Example(features=tf.train.Features(feature=feature_dict))
 
 
-def save_tfrecrd(images, labels, filename):
+def save_tfrecrd(images: typing.List[np.ndarray],
+                 labels: typing.List[str],
+                 filename: str,
+                 format: str):
     tf_writer = tf.io.TFRecordWriter(filename)
     for i in range(len(images)):
-        tf_example = to_tfrecord(cv2.cvtColor(images[i], cv2.COLOR_RGB2BGR), labels[i])
+        tf_example = to_tfrecord(cv2.cvtColor(images[i], cv2.COLOR_RGB2BGR), labels[i], format)
         tf_writer.write(tf_example.SerializeToString())
     tf_writer.close()
 
 
-def write_tfrecord():
-    train_X = read_all_images("train_X.bin")
-    train_y = read_labels("train_y.bin")
-    print(train_X.shape)
-    print(train_y.shape)
-    save_tfrecrd(train_X, train_y, "stl10_train.tfrecord")
-    test_X = read_all_images("test_X.bin")
-    test_y = read_labels("test_y.bin")
-    print(test_X.shape)
-    print(test_y.shape)
-    save_tfrecrd(test_X, test_y, "stl10_test.tfrecord")
+def write_tfrecord(format, train_x, train_y, test_x, test_y):
+    save_tfrecrd(train_x, train_y, f"stl10_train{format}.tfrecord", format)
+    save_tfrecrd(test_x, test_y, f"stl10_test{format}.tfrecord", format)
 
 
 def decode_fn(record_bytes):
@@ -85,8 +84,9 @@ def decode_fn(record_bytes):
     )
 
 
-def read_tfrecord():
-    a = tf.data.TFRecordDataset('stl10_train.tfrecord').map(decode_fn)
+def read_tfrecord(format):
+    a = tf.data.TFRecordDataset(f'stl10_train{format}.tfrecord').map(decode_fn)
+    datas = []
     for e in a:
         height = e['height']
         width = e['width']
@@ -94,13 +94,51 @@ def read_tfrecord():
         image = np.frombuffer(e['image'].numpy(), np.uint8)  # .reshape(height, width, channel)
         image = cv2.imdecode(image, cv2.IMREAD_UNCHANGED)
         label = e['label']
-        print(image.shape)
-        print(label)
-        image = cv2.resize(image, (256, 256))
-        cv2.imshow("img", image)
-        cv2.waitKey(0)
+        datas.append((image, label))
+    return datas
+
+
+def test_write():
+    train_x = read_all_images("train_X.bin")
+    train_y = read_labels("train_y.bin")
+    test_x = read_all_images("test_X.bin")
+    test_y = read_labels("test_y.bin")
+
+    formats = [".bmp", ".jpg", ".png", ".webp", ".tiff"]
+    colors = ["dodgerblue", "royalblue", "mediumblue"]
+    bar_width = 0.8
+    x = np.arange(len(formats))
+    plots = []
+    data_list = []
+
+    for i in range(len(formats)):
+        filename = f"stl10_{formats[i]}.tfrecord"
+        start = time.time()
+        write_tfrecord(formats[i], train_x, train_y, test_x, test_y)
+        print(f"{formats[i]} time: {time.time() - start} Sec")
+        filesize = (os.path.getsize(f"stl10_train{formats[i]}.tfrecord") + os.path.getsize(
+            f"stl10_test{formats[i]}.tfrecord")) // 1024
+        data_list.append(filesize)
+
+    plt.bar(x=x, height=data_list, width=bar_width, color="dodgerblue")
+
+    plt.ylabel('File Size(KB)', fontsize=16)
+    plt.xlabel('Image File Formats', fontsize=16)
+    plt.xticks(x, formats, fontsize=14)
+
+    plt.legend(list(map(lambda x: x[0], plots)), ('Train', 'Valid', 'Test'), fontsize=15)
+    plt.savefig("cmp_img_fmts.png", bbox_inches='tight')
+    plt.show()
+    # read_tfrecord()
+
+
+def test_read():
+    formats = [".bmp", ".jpg", ".png", ".webp", ".tiff"]
+    for i in range(len(formats)):
+        start = time.time()
+        read_tfrecord(formats[i])
+        print(f"{formats[i]} time: {time.time() - start} Sec")
 
 
 if __name__ == "__main__":
-    write_tfrecord()
-    # read_tfrecord()
+    test_read()
